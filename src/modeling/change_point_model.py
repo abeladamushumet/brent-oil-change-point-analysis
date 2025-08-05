@@ -1,73 +1,83 @@
 import pymc as pm
 import numpy as np
 import matplotlib.pyplot as plt
+import arviz as az
 
 def build_model(data):
     """
     Builds a Bayesian change point model for Brent oil price data.
 
     Parameters:
-    - data: A numpy array or list of oil prices
+        data (array-like): 1D array of oil prices.
 
     Returns:
-    - model: a compiled PyMC3 model
+        model (pm.Model): PyMC model.
     """
     n = len(data)
+    mean_val = np.mean(data)
+    std_val = np.std(data)
+
     with pm.Model() as model:
-        # Change point (somewhere in the middle of the series)
-        tau = pm.DiscreteUniform('tau', lower=0, upper=n)
+        # Prior for change point 
+        tau = pm.DiscreteUniform("tau", lower=0, upper=n - 1)
 
-        # Parameters before and after the change point
-        mu1 = pm.Normal('mu1', mu=np.mean(data), sigma=np.std(data))
-        mu2 = pm.Normal('mu2', mu=np.mean(data), sigma=np.std(data))
-        sigma = pm.HalfNormal('sigma', sigma=1)
+        # Priors for means before and after change
+        mu1 = pm.Normal("mu1", mu=mean_val, sigma=std_val)
+        mu2 = pm.Normal("mu2", mu=mean_val, sigma=std_val)
 
-        # Switch based on tau
-        mu = pm.math.switch(tau >= np.arange(n), mu1, mu2)
+        # Shared noise level
+        sigma = pm.HalfNormal("sigma", sigma=std_val)
+
+        # Switch between mu1 and mu2 based on tau
+        mu = pm.math.switch(np.arange(n) < tau, mu1, mu2)
 
         # Likelihood
-        obs = pm.Normal('obs', mu=mu, sigma=sigma, observed=data)
+        pm.Normal("obs", mu=mu, sigma=sigma, observed=data)
 
     return model
 
-def run_inference(model, draws=2000, tune=1000, target_accept=0.95):
+
+def run_inference(model, draws=1000, tune=500, target_accept=0.9):
     """
-    Runs MCMC sampling using NUTS for the given model.
+    Runs MCMC inference using NUTS sampler.
 
     Parameters:
-    - model: a PyMC3 model
-    - draws: total number of MCMC samples
-    - tune: number of tuning steps
-    - target_accept: acceptance rate for NUTS
+        model (pm.Model): PyMC model.
+        draws (int): Number of samples.
+        tune (int): Number of tuning steps.
+        target_accept (float): Acceptance probability for NUTS.
 
     Returns:
-    - trace: the sampling trace
+        trace (arviz.InferenceData): Inference results.
     """
     with model:
-        trace = pm.sample(draws=draws, tune=tune, target_accept=target_accept, return_inferencedata=True)
+        trace = pm.sample(draws=draws, tune=tune, target_accept=target_accept,
+                          chains=2, cores=1, return_inferencedata=True,
+                          progressbar=True)
     return trace
+
 
 def get_change_point(trace):
     """
-    Extracts the most likely change point from the trace.
+    Gets the most likely change point index (posterior median of tau).
 
     Parameters:
-    - trace: the MCMC sampling result
+        trace (arviz.InferenceData): Sampling trace.
 
     Returns:
-    - change_point_index: index of detected change point (integer)
+        int: Detected change point index.
     """
     tau_samples = trace.posterior['tau'].values.flatten()
-    change_point_index = int(np.median(tau_samples))
-    return change_point_index
+    return int(np.median(tau_samples))
+
 
 def plot_posterior(trace):
     """
-    Plots the posterior distributions of model parameters.
+    Plots posterior distributions for key parameters.
 
     Parameters:
-    - trace: the sampling trace (InferenceData object)
+        trace (arviz.InferenceData): Inference result.
     """
-    pm.plot_posterior(trace, var_names=["tau", "mu1", "mu2"])
+    az.plot_posterior(trace, var_names=["tau", "mu1", "mu2"], hdi_prob=0.94)
     plt.tight_layout()
     plt.show()
