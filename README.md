@@ -79,3 +79,4 @@ The analysis provides:
 
 This project is licensed under the Apache License.
 
+![Dashboard ](repots/figures/dashbord.png)
